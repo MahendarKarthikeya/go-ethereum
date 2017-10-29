@@ -33,29 +33,16 @@ import (
 // faucetDockerfile is the Dockerfile required to build an faucet container to
 // grant crypto tokens based on GitHub authentications.
 var faucetDockerfile = `
-FROM alpine:latest
-
-RUN mkdir /go
-ENV GOPATH /go
-
-RUN \
-  apk add --update git go make gcc musl-dev ca-certificates linux-headers                             && \
-	mkdir -p $GOPATH/src/github.com/ethereum                                                            && \
-	(cd $GOPATH/src/github.com/ethereum && git clone --depth=1 https://github.com/ethereum/go-ethereum) && \
-  go build -v github.com/ethereum/go-ethereum/cmd/faucet                                              && \
-  apk del git go make gcc musl-dev linux-headers                                                      && \
-  rm -rf $GOPATH && rm -rf /var/cache/apk/*
+FROM puppeth/faucet:latest
 
 ADD genesis.json /genesis.json
 ADD account.json /account.json
 ADD account.pass /account.pass
 
-EXPOSE 8080
-
-CMD [ \
-	"/faucet", "--genesis", "/genesis.json", "--network", "{{.NetworkID}}", "--bootnodes", "{{.Bootnodes}}", "--ethstats", "{{.Ethstats}}", "--ethport", "{{.EthPort}}",    \
+ENTRYPOINT [ \
+	"faucet", "--genesis", "/genesis.json", "--network", "{{.NetworkID}}", "--bootnodes", "{{.Bootnodes}}", "--ethstats", "{{.Ethstats}}", "--ethport", "{{.EthPort}}",     \
 	"--faucet.name", "{{.FaucetName}}", "--faucet.amount", "{{.FaucetAmount}}", "--faucet.minutes", "{{.FaucetMinutes}}", "--faucet.tiers", "{{.FaucetTiers}}",             \
-	{{if .GitHubUser}}"--github.user", "{{.GitHubUser}}", "--github.token", "{{.GitHubToken}}", {{end}}"--account.json", "/account.json", "--account.pass", "/account.pass" \
+	"--account.json", "/account.json", "--account.pass", "/account.pass"                                                                                                    \
 	{{if .CaptchaToken}}, "--captcha.token", "{{.CaptchaToken}}", "--captcha.secret", "{{.CaptchaSecret}}"{{end}}{{if .NoAuth}}, "--noauth"{{end}}                          \
 ]`
 
@@ -78,8 +65,6 @@ services:
       - FAUCET_AMOUNT={{.FaucetAmount}}
       - FAUCET_MINUTES={{.FaucetMinutes}}
       - FAUCET_TIERS={{.FaucetTiers}}
-      - GITHUB_USER={{.GitHubUser}}
-      - GITHUB_TOKEN={{.GitHubToken}}
       - CAPTCHA_TOKEN={{.CaptchaToken}}
       - CAPTCHA_SECRET={{.CaptchaSecret}}
       - NO_AUTH={{.NoAuth}}{{if .VHost}}
@@ -107,8 +92,6 @@ func deployFaucet(client *sshClient, network string, bootnodes []string, config 
 		"Bootnodes":     strings.Join(bootnodes, ","),
 		"Ethstats":      config.node.ethstats,
 		"EthPort":       config.node.portFull,
-		"GitHubUser":    config.githubUser,
-		"GitHubToken":   config.githubToken,
 		"CaptchaToken":  config.captchaToken,
 		"CaptchaSecret": config.captchaSecret,
 		"FaucetName":    strings.Title(network),
@@ -127,8 +110,6 @@ func deployFaucet(client *sshClient, network string, bootnodes []string, config 
 		"ApiPort":       config.port,
 		"EthPort":       config.node.portFull,
 		"EthName":       config.node.ethstats[:strings.Index(config.node.ethstats, ":")],
-		"GitHubUser":    config.githubUser,
-		"GitHubToken":   config.githubToken,
 		"CaptchaToken":  config.captchaToken,
 		"CaptchaSecret": config.captchaSecret,
 		"FaucetAmount":  config.amount,
@@ -165,8 +146,6 @@ type faucetInfos struct {
 	minutes       int
 	tiers         int
 	noauth        bool
-	githubUser    string
-	githubToken   string
 	captchaToken  string
 	captchaSecret string
 }
@@ -183,11 +162,6 @@ func (info *faucetInfos) Report() map[string]string {
 		"Funding tiers":                strconv.Itoa(info.tiers),
 		"Captha protection":            fmt.Sprintf("%v", info.captchaToken != ""),
 		"Ethstats username":            info.node.ethstats,
-	}
-	if info.githubUser != "" {
-		report["GitHub authentication"] = info.githubUser
-	} else {
-		report["GitHub authentication"] = "disabled, rate-limited"
 	}
 	if info.noauth {
 		report["Debug mode (no auth)"] = "enabled"
@@ -262,8 +236,6 @@ func checkFaucet(client *sshClient, network string) (*faucetInfos, error) {
 		amount:        amount,
 		minutes:       minutes,
 		tiers:         tiers,
-		githubUser:    infos.envvars["GITHUB_USER"],
-		githubToken:   infos.envvars["GITHUB_TOKEN"],
 		captchaToken:  infos.envvars["CAPTCHA_TOKEN"],
 		captchaSecret: infos.envvars["CAPTCHA_SECRET"],
 		noauth:        infos.envvars["NO_AUTH"] == "true",
